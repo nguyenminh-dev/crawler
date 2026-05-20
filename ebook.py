@@ -138,7 +138,6 @@ async def crawl_all_links(context, start_page=1, end_page=500):
 # HÀM LƯU LOG NHỮNG SÁCH ĐÃ TẢI
 # =========================================================
 def log_downloaded_book(book_url):
-    # Ghi nối (append) url vào file sổ tay
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(book_url + "\n")
 
@@ -166,7 +165,7 @@ async def process_single_book(context, book_url, idx, total, semaphore):
                 await remove_popup(page)
                 
                 buttons = await page.locator("a").all()
-                pdf_btn, epub_btn = None, None
+                epub_btn, azw3_btn, pdf_btn = None, None, None
 
                 for btn in buttons:
                     try:
@@ -176,27 +175,33 @@ async def process_single_book(context, book_url, idx, total, semaphore):
                         href = await btn.get_attribute("href")
                         if not href: continue
                         
-                        is_pdf = ".pdf" in href.lower()
                         is_epub = ".epub" in href.lower()
+                        is_azw3 = ".azw3" in href.lower()
+                        is_pdf = ".pdf" in href.lower()
                         
-                        if not is_pdf and not is_epub:
+                        if not is_epub and not is_azw3 and not is_pdf:
                             ancestor = btn
                             for _ in range(4):
                                 try:
                                     ancestor = ancestor.locator("xpath=..")
                                     ancestor_text = (await ancestor.inner_text()).lower()
-                                    if ".pdf" in ancestor_text and len(ancestor_text) < 200:
-                                        is_pdf = True; break
-                                    elif ".epub" in ancestor_text and len(ancestor_text) < 200:
+                                    if ".epub" in ancestor_text and len(ancestor_text) < 200:
                                         is_epub = True; break
+                                    elif ".azw3" in ancestor_text and len(ancestor_text) < 200:
+                                        is_azw3 = True; break
+                                    elif ".pdf" in ancestor_text and len(ancestor_text) < 200:
+                                        is_pdf = True; break
                                 except: break
                         
-                        if is_pdf and not pdf_btn: pdf_btn = btn
-                        elif is_epub and not epub_btn: epub_btn = btn
+                        # Lưu nút tìm được
+                        if is_epub and not epub_btn: epub_btn = btn
+                        elif is_azw3 and not azw3_btn: azw3_btn = btn
+                        elif is_pdf and not pdf_btn: pdf_btn = btn
                     except: pass
 
-                target_btn = pdf_btn if pdf_btn else epub_btn
-                target_type = "PDF" if pdf_btn else ("EPUB" if epub_btn else None)
+                # Ưu tiên: EPUB > AZW3 > PDF
+                target_btn = epub_btn if epub_btn else (azw3_btn if azw3_btn else pdf_btn)
+                target_type = "EPUB" if epub_btn else ("AZW3" if azw3_btn else ("PDF" if pdf_btn else None))
 
                 if target_btn:
                     print(f"[{idx}/{total}] -> Phát hiện {target_type}. Đang tiến hành tải...")
@@ -217,11 +222,9 @@ async def process_single_book(context, book_url, idx, total, semaphore):
                     await download.save_as(save_path)
                     print(f"[{idx}/{total}] -> ĐÃ TẢI XONG: {safe_name}")
                     
-                    # Ghi vào SỔ TAY sau khi lưu file thành công
                     log_downloaded_book(book_url)
                 else:
-                    print(f"[{idx}/{total}] -> Không có PDF/EPUB, bỏ qua.")
-                    # Ghi vào SỔ TAY để lần sau cũng không cần vào kiểm tra lại cuốn này nữa
+                    print(f"[{idx}/{total}] -> Không có EPUB/AZW3/PDF, bỏ qua.")
                     log_downloaded_book(book_url)
                 
                 break 
@@ -251,7 +254,6 @@ async def download_books(context, start_page=1, end_page=None, start_index=1):
 
     all_book_links = []
     
-    # 1. Gom link từ các file txt
     for page_num in range(start_page, end_page + 1):
         file_path = os.path.join(LINKS_DIR, f"page_{page_num}.txt")
         if os.path.exists(file_path):
@@ -260,19 +262,12 @@ async def download_books(context, start_page=1, end_page=None, start_index=1):
         else:
             print(f"-> Bỏ qua Trang {page_num}: Chưa có file link.")
 
-    # Loại bỏ link trùng lặp
     all_book_links = list(dict.fromkeys(all_book_links))
     
-    # ========================================================
-    # TÍNH NĂNG 1: BỎ QUA N CUỐN SÁCH ĐẦU TIÊN THEO YÊU CẦU
-    # ========================================================
     if start_index > 1:
         print(f"-> Yêu cầu: Bỏ qua {start_index - 1} cuốn sách đầu tiên...")
         all_book_links = all_book_links[start_index - 1 :]
 
-    # ========================================================
-    # TÍNH NĂNG 2: BỎ QUA NHỮNG CUỐN ĐÃ TẢI TRONG SỔ TAY
-    # ========================================================
     downloaded_set = set()
     if os.path.exists(LOG_FILE):
         with open(LOG_FILE, "r", encoding="utf-8") as f:
@@ -330,10 +325,6 @@ async def main():
 
         # ---------------------------------------------------------
         # [BƯỚC 2] Tải sách THEO TRANG VÀ THEO INDEX
-        # Vì bạn ĐÃ TẢI 225 file, hãy thêm start_index=226 để Bot nhảy qua 225 file đầu tiên.
-        # Lưu ý: Các lần chạy sau, bạn có thể xóa start_index đi, vì cuốn sổ tay 'downloaded_log.txt' 
-        # sẽ tự động nhớ và skip giúp bạn rồi!
-        
         await download_books(context, start_page=1, end_page=464, start_index=226)
         # ---------------------------------------------------------
 
